@@ -49,3 +49,5 @@ data2 = data %>%
 
 data2 = data2 %>%
   mutate(dataset = "Arctos")
+
+view(head(data))

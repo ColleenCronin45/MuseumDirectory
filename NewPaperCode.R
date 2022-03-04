@@ -2,6 +2,7 @@ require(tidyverse)
 require(sqldf)
 require(here)
 require(readxl)
+require(foreign)
 # 
 # Dataset = read_delim("C:/Users/Lump/OneDrive/Desktop/MCMSpring/CaseStudy/FINAL_PAPER_STUFF/0124064-210914110416597/occurrence.txt")
 # 
@@ -54,7 +55,7 @@ Dataset %>% filter(is.na(year) & is.na(eventDate))
 tissue2 = c("blood", "sangre", "tiss", "tejid", "serum", "suero", "plasma", "biopsy", "biopsia", "swab", "torunda") %>%
   paste(collapse = "|")
 
-buffer2 = c("ethanol", "etanol", "EtOH", "VTM", "RNAlater","shield") %>%
+buffer2 = c("ethanol", "etanol", "EtOH", "VTM", "RNAlater","shield", "alcohol", "lysis", "DMSO","EDTA") %>%
   paste(collapse = "|")
 
 frozen2 = c("froze", "freez", "congelad") %>%
@@ -122,7 +123,48 @@ Dataset = Dataset %>%
     is.na(decimalLongitude) ~ Longitude
   ))
 
+Dataset = Dataset %>%
+  mutate(tissUbuff = case_when(
+    tissue == 1 ~ 1,
+    buffer == 1 ~ 1,
+    TRUE ~ 0
+  ))
+
+Dataset = Dataset %>%
+  mutate(ethanolPrep = case_when(
+    str_detect(tolower(preparations), "ethanol|etanol|EtOH|alcohol") ~ 1,
+    TRUE ~ 0
+  )) %>%
+  mutate(ethanolAll= case_when(
+    str_detect(tolower(preparations), "ethanol|etanol|EtOH|alcohol") ~ 1,
+    str_detect(tolower(dynamicProperties), "ethanol|etanol|EtOH|alcohol") ~ 1,
+    str_detect(tolower(occurrenceRemarks), "ethanol|etanol|EtOH|alcohol") ~ 1,
+    TRUE ~ 0
+  ))
+Dataset %>%
+  summarize(ethanolPrep = sum(ethanolPrep, na.rm = TRUE),
+            ethanolAll = sum(ethanolAll, na.rm = TRUE)) %>%
+  mutate(proportion = ethanolPrep/ethanolAll)
+
 Dataset %>%
   group_by(order, species)%>%
   summarize(n = n())%>%
   write_csv(here("SpeciesFrequency.csv"))
+
+Dataset %>%
+  group_by(order, species)%>%
+  summarize(frozen = sum(frozen, na.rm = T),
+            tissue = sum(tissue, na.rm = T),
+            buffer = sum(buffer, na.rm = T),
+            tissUbuff = sum(tissUbuff, na.rm = T))%>%
+  write_csv(here("SpeciesFTBfrequency3.4.22.csv"))
+
+Dataset2 = Dataset %>%
+  select(-eventDate)
+
+#exporting data as .csv
+Dataset %>%
+  write_csv(here("Dataset_3.4.22.csv"))
+
+#exporting data as a .dbf
+write.dbf(as.data.frame(Dataset2), here("Dataset_2.21.dbf"))

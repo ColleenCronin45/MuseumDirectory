@@ -18,10 +18,17 @@ setwd("~/Desktop/MuseumDirectory")
 data1=read.csv('SpeciesFrequency.csv')
 data2=read.csv('SpeciesFTBfrequency3.4.22.csv')
 
+## remove no species
+data1=data1[!is.na(data1$species),]
+data2=data2[!is.na(data2$species),]
+
 ## combinee
 data1$order=NULL
 data=merge(data1,data2,by="species")
 rm(data1,data2)
+
+## tissue as focus
+data$tsample=ifelse(data$tissue>0,1,0)
 
 ## load taxonomy and phy
 setwd("~/Desktop/BeckerLabOU/phylos")
@@ -36,6 +43,114 @@ taxonomy=taxonomy[taxonomy$ord%in%c("CHIROPTERA","RODENTIA"),]
 taxonomy$tip=sapply(strsplit(taxonomy$tiplabel,'_'),function(x) paste(x[1],x[2],sep='_'))
 data$tip=gsub(" ","_",data$species)
 
+## check names
+setdiff(data$tip,taxonomy$tip)
+
+## fix data names
+diff=setdiff(data$tip,taxonomy$tip)
+
+## set key for taxonomy
+library(taxize)
+library(rentrez)
+
+## set key
+set_entrez_key("08bfe1677e98cb10837653b9b0dee88c9c09")
+Sys.getenv("ENTREZ_KEY")
+
+## write function
+taxtake=function(x){
+  y=as.data.frame(x)
+  y=tail(y,1)
+  return(y)
+}
+
+## save records
+httr::set_config(httr::config(http_version = 0))
+tax=rep(NA,length(diff))
+
+## loop
+for(i in 1:length(tax)){
+  
+  ## classify
+  cset=classification(diff[i],db="ncbi",rows=1)
+  tax[i]=sapply(cset,function(x) taxtake(as.data.frame(x)))
+  #Sys.sleep(1)
+  
+  # tax[i]=sapply(classification(data$unique_name[i],db="ncbi",rows=1),
+  #               function(x) taxtake(as.data.frame(x)))
+}
+
+## save tax
+tdata=do.call(rbind.data.frame,tax)
+names(tdata)="newtip"
+tdata$tip=diff
+
+## fix tip
+tdata$newtip=gsub(" ","_",tdata$newtip)
+
+## check against taxonomy
+setdiff(tdata$newtip,taxonomy$tip)
+length(setdiff(tdata$newtip,taxonomy$tip))
+
+## merge into data
+data=merge(data,tdata,by="tip",all.x=T)
+
+## setdiff for tip in tree
+data$tree=ifelse(data$tip%in%setdiff(data$tip,taxonomy$tip),0,1)
+
+## if 0, use new tips
+data$match=ifelse(data$tree==0,data$newtip,data$tip)
+
+## if newtip is 0, use original
+data$match=ifelse(is.na(data$match),data$tip,data$match)
+
+## if the tip is in the tree
+data$tree2=ifelse(data$match%in%setdiff(data$match,taxonomy$tip),0,1)
+
+## set match as tip
+data$tip=data$match
+data$newtip=NULL
+data$match=NULL
+data$tree=data$tree2
+data$tree2=NULL
+
+## new setdiff
+diff=setdiff(data$tip,taxonomy$tip)
+
+## export
+setwd("~/Desktop/MuseumDirectory")
+set=data.frame(old_name=diff)
+write.csv("Upham mismatch.csv")
+
+## new taxize
+httr::set_config(httr::config(http_version = 0))
+tax=rep(NA,length(diff))
+
+## loop
+for(i in 1:length(tax)){
+  
+  ## classify
+  cset=classification(diff[i],db="gbif",rows=1)
+  tax[i]=sapply(cset,function(x) taxtake(as.data.frame(x)))
+  #Sys.sleep(1)
+  
+  # tax[i]=sapply(classification(data$unique_name[i],db="ncbi",rows=1),
+  #               function(x) taxtake(as.data.frame(x)))
+}
+
+## save tax
+tdata=do.call(rbind.data.frame,tax)
+names(tdata)="newtip"
+tdata$tip=diff
+
+## fix tip
+tdata$newtip=gsub(" ","_",tdata$newtip)
+
+## update tips here
+
+## how many in tree but not in data
+setdiff(taxonomy$tip,data$tip)
+
 ## mark 0/1 for sampled
 tdata=taxonomy
 tdata$sampled=ifelse(tdata$tip%in%data$tip,1,0)
@@ -43,6 +158,7 @@ tdata$sampled=ifelse(tdata$tip%in%data$tip,1,0)
 ## subset data
 data$tree=ifelse(data$tip%in%taxonomy$tip,1,0)
 table(data$tree)
+table(tdata$sampled)
 data=data[data$tree==1,]
 
 ## make simple names
@@ -50,15 +166,15 @@ tree$tip.label=sapply(strsplit(tree$tip.label,'_'),function(x) paste(x[1],x[2],s
 
 ## trim phylo
 rtree=tree
-tree=keep.tip(rtree,data$tip)
-atree=keep.tip(rtree,taxonomy$tip)
+tree=keep.tip(rtree,data$tip) ## sampled bats and rodents
+atree=keep.tip(rtree,taxonomy$tip) ## all bats and rodents
 
 ## merge
-data=merge(data,taxonomy,by="tip")
+data=merge(data,taxonomy,by="tip") ## sampled
 
 ## match
-bdata=data[match(tree$tip.label,data$tip),]
-adata=tdata[match(atree$tip.label,tdata$tip),]
+bdata=data[match(tree$tip.label,data$tip),] ## sampled
+adata=tdata[match(atree$tip.label,tdata$tip),] ## all
 
 ## save
 bdata$label=bdata$tip
@@ -194,41 +310,27 @@ taxonomy$taxonomy=as.character(taxonomy$taxonomy)
 set.seed(1)
 bpf=gpf(Data=adata$data,tree=adata$phy,
         frmla.phylo=sampled~phylo,
-        family=binomial,algorithm='phylo',nfactors=10,min.group.size=5)
+        family=binomial,algorithm='phylo',nfactors=5,min.group.size=10)
 
 ## summarize
 bpf_results=pfsum(bpf)$results
 
-## negbin model fcn
-model.fcn2 <- function(formula,data,...){
-  fit <- tryCatch(MASS::glm.nb(formula,data,...),
-                  error=function(e) NA)
-  #fit <- do.call
-  return(fit)
-}
-
-## negbin objective function
-obj.fcn2 <- function(fit,grp,tree,PartitioningVariables,model.fcn,phyloData,...){
-  #if (!'negbin' %in% class(fit) & !'glm' %in% class(fit) & !'lm' %in% class(fit))
-  if (!'negbin' %in% class(fit))
-  {
-    return(0)
-  }
-  else 
-  {
-    #fit2 <- MASS::glm.nb(Z.poisson~1,data = fit$model)
-    fit$null.deviance-fit$deviance %>% return()
-    #fit$twologlik %>% return()
-  }
-}
-
-## for tissue
+## for all samples
 set.seed(1)
-tpf=gpf(Data=cdata$data,tree=cdata$phy,
-        frmla.phylo=tissUbuff~phylo,
-        model.fcn = model.fcn2,objective.fcn = obj.fcn2,
-        cluster.depends='library(MASS)',
-        algorithm='phylo',nfactors=3,min.group.size=5)
+allpf=gpf(Data=cdata$data,tree=cdata$phy,
+         frmla.phylo=tissue~phylo,
+         family=poisson,
+         algorithm='phylo',nfactors=4,min.group.size=20)
+
+## summarize
+allpf_results=pfsum(allpf)$results
+
+## for frozen tissue
+set.seed(1)
+frpf=gpf(Data=cdata$data,tree=cdata$phy,
+        frmla.phylo=frozen~phylo,
+        family=poisson,
+        algorithm='phylo',nfactors=5,min.group.size=5)
 
 ## as binomial
 cdata$data$pos=cdata$data$tissUbuff

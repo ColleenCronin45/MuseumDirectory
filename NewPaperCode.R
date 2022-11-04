@@ -147,17 +147,17 @@ Dataset %>%
   mutate(proportion = ethanolPrep/ethanolAll)
 
 Dataset %>%
-  group_by(order, species)%>%
+  group_by(order, species, taxonKey)%>%
   summarize(n = n())%>%
-  write_csv(here("SpeciesFrequency.csv"))
+  write_csv(here("SpeciesFrequency11.4.22.csv"))
 
 Dataset %>%
-  group_by(order, species)%>%
+  group_by(order, species,taxonKey)%>%
   summarize(frozen = sum(frozen, na.rm = T),
             tissue = sum(tissue, na.rm = T),
             buffer = sum(buffer, na.rm = T),
             tissUbuff = sum(tissUbuff, na.rm = T))%>%
-  write_csv(here("SpeciesFTBfrequency3.4.22.csv"))
+  write_csv(here("SpeciesFTBfrequency11.4.22.csv"))
 
 Dataset2 = Dataset %>%
   select(-eventDate)
